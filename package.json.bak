@@ -1,0 +1,41 @@
+{
+  "name": "@revcover/api",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --import=tsx src/index.ts",
+    "dev": "dotenv -e .env.local -- tsx watch src/index.ts",
+<<<<<<< HEAD
+    "dev:plain": "tsx watch src/index.ts"
+=======
+    "dev:plain": "tsx watch src/index.ts",
+    "test": "vitest run"
+>>>>>>> 356ac8b (chore(core): add ops scripts, migrations skeleton, flags, UTC/health scaffolds)
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "fastify": "^4.27.2",
+<<<<<<< HEAD
+    "stripe": "^15.0.0",
+    "tsx": "^4.19.0"
+=======
+    "fastify-raw-body": "^4.3.0",
+    "jszip": "^3.10.1",
+    "pdfkit": "^0.17.2",
+    "stripe": "^17.4.0",
+    "tsx": "^4.19.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "24.9.1",
+    "dotenv-cli": "^7.4.2",
+    "vitest": "^4.0.3"
+>>>>>>> 356ac8b (chore(core): add ops scripts, migrations skeleton, flags, UTC/health scaffolds)
+  },
+  "devDependencies": {
+    "dotenv-cli": "^7.4.2"
+  },
+  "engines": { "node": ">=20" }
+}
