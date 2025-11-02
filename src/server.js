@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import rawBody from "@fastify/raw-body";
+import fastifyRawBody from "fastify-raw-body";
 import Stripe from "stripe";
 import dotenv from "dotenv";
 import { supabaseAdmin } from "./supabase.js";
@@ -8,8 +8,8 @@ dotenv.config();
 
 const app = Fastify({ logger: true });
 
-await app.register(rawBody, { field: "rawBody", global: false, runFirst: true });
-
+await app.register(fastifyRawBody, { field: "rawBody", global: false, runFirst: true
+  
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20"
 });
