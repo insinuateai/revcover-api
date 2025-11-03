@@ -24,19 +24,19 @@ function authed(req) {
 
 // env presence (booleans only)
 app.get("/diag/env", async (req, reply) => {
-  if (!authed(req)) return reply.code(401).send({ ok:false, error:"unauthorized" });
+  if (!authed(req)) return reply.code(401).send({ ok: false, error: "unauthorized" });
   return reply.send({
     node: process.versions.node,
     hasSupabaseUrl: !!process.env.SUPABASE_URL,
     hasServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     hasStripeSecret: !!process.env.STRIPE_SECRET_KEY,
-    hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET
+    hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
   });
 });
 
 // direct DB write test (no Stripe needed)
 app.post("/diag/db", async (req, reply) => {
-  if (!authed(req)) return reply.code(401).send({ ok:false, error:"unauthorized" });
+  if (!authed(req)) return reply.code(401).send({ ok: false, error: "unauthorized" });
 
   const row = {
     stripe_event_id: "diag_" + Date.now(),
@@ -44,15 +44,15 @@ app.post("/diag/db", async (req, reply) => {
     amount: 12.34,
     currency: "usd",
     status: "recovered",
-    invoice_id: "diag_inv_" + Date.now()
+    invoice_id: "diag_inv_" + Date.now(),
   };
 
   const { error } = await supabaseAdmin.from("receipts").upsert(row, { onConflict: "stripe_event_id" });
   if (error) {
     app.log.error({ error_detail: error }, "diag supabase upsert failed");
-    return reply.code(500).send({ ok:false, error:"db_write_failed", detail: error.message || error });
+    return reply.code(500).send({ ok: false, error: "db_write_failed", detail: error.message || error });
   }
-  return reply.send({ ok:true });
+  return reply.send({ ok: true });
 });
 
 /* ---------- Stripe webhook ---------- */
@@ -70,21 +70,36 @@ app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, repl
 
   const type = event.type;
   const data = event.data.object || {};
+
   const statusByType = {
     "invoice.payment_failed": "failed",
     "invoice.paid": "recovered",
-    "invoice.payment_succeeded": "recovered"
+    "invoice.payment_succeeded": "recovered",
   };
 
+  // helper to pick the first non-null/undefined value
+  const pick = (...vals) => vals.find((v) => v !== undefined && v !== null);
+
   if (statusByType[type]) {
-    const amountCents = data.amount_paid ?? data.amount_due ?? data.amount ?? 0;
+    // More robust across invoice events:
+    // - failures often have amount_remaining / total
+    // - successes have amount_paid / total
+    const amountCents = pick(
+      data.amount_remaining,
+      data.amount_due,
+      data.total,
+      data.subtotal,
+      data.amount_paid,
+      data.amount
+    );
+
     const row = {
       stripe_event_id: event.id,
       customer_email: data.customer_email ?? data.customer ?? null,
-      amount: (amountCents || 0) / 100,
+      amount: ((amountCents ?? 0) / 100),
       currency: (data.currency || "usd").toLowerCase(),
       status: statusByType[type],
-      invoice_id: data.id
+      invoice_id: data.id,
     };
 
     const { error } = await supabaseAdmin.from("receipts").upsert(row, { onConflict: "stripe_event_id" });
@@ -98,4 +113,7 @@ app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, repl
 });
 
 const PORT = Number(process.env.PORT || 8080);
-app.listen({ port: PORT, host: "0.0.0.0" }).catch((e) => { console.error(e); process.exit(1); });
+app.listen({ port: PORT, host: "0.0.0.0" }).catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
