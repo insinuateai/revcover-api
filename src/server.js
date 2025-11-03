@@ -1,4 +1,3 @@
-// src/server.js
 import Fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 import Stripe from "stripe";
@@ -17,13 +16,15 @@ const DIAG_TOKEN = process.env.DIAG_TOKEN || "";
 app.get("/health", async () => ({ ok: true }));
 
 /* ---------- diagnostics (temporary) ---------- */
-function assertToken(t) {
-  return DIAG_TOKEN && t === DIAG_TOKEN;
+function authed(req) {
+  const hdr = req.headers["x-diag-token"];
+  const q = (req.query && (req.query.token || req.query.t)) || undefined;
+  return DIAG_TOKEN && (hdr === DIAG_TOKEN || q === DIAG_TOKEN);
 }
 
-// 1) env presence (booleans only)
+// env presence (booleans only)
 app.get("/diag/env", async (req, reply) => {
-  if (!assertToken(req.headers["x-diag-token"])) return reply.code(401).send({ ok:false, error:"unauthorized" });
+  if (!authed(req)) return reply.code(401).send({ ok:false, error:"unauthorized" });
   return reply.send({
     node: process.versions.node,
     hasSupabaseUrl: !!process.env.SUPABASE_URL,
@@ -33,9 +34,9 @@ app.get("/diag/env", async (req, reply) => {
   });
 });
 
-// 2) DB write test (no Stripe needed)
+// direct DB write test (no Stripe needed)
 app.post("/diag/db", async (req, reply) => {
-  if (!assertToken(req.headers["x-diag-token"])) return reply.code(401).send({ ok:false, error:"unauthorized" });
+  if (!authed(req)) return reply.code(401).send({ ok:false, error:"unauthorized" });
 
   const row = {
     stripe_event_id: "diag_" + Date.now(),
@@ -54,12 +55,6 @@ app.post("/diag/db", async (req, reply) => {
   return reply.send({ ok:true });
 });
 
-// 3) version ping
-app.get("/diag/version", async (req, reply) => {
-  if (!assertToken(req.headers["x-diag-token"])) return reply.code(401).send({ ok:false, error:"unauthorized" });
-  return reply.send({ node: process.versions.node });
-});
-
 /* ---------- Stripe webhook ---------- */
 app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, reply) => {
   const sig = req.headers["stripe-signature"];
@@ -75,14 +70,12 @@ app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, repl
 
   const type = event.type;
   const data = event.data.object || {};
-
   const statusByType = {
     "invoice.payment_failed": "failed",
     "invoice.paid": "recovered",
     "invoice.payment_succeeded": "recovered"
   };
 
-  // ignore others (e.g., invoice.finalized)
   if (statusByType[type]) {
     const amountCents = data.amount_paid ?? data.amount_due ?? data.amount ?? 0;
     const row = {
