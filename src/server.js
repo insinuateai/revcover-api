@@ -1,3 +1,4 @@
+// src/server.js
 import Fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 import Stripe from "stripe";
@@ -7,26 +8,66 @@ import { supabaseAdmin } from "./supabase.js";
 dotenv.config();
 
 const app = Fastify({ logger: true });
-
 await app.register(fastifyRawBody, { field: "rawBody", global: false, runFirst: true });
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-06-20"
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+const DIAG_TOKEN = process.env.DIAG_TOKEN || "";
 
+/* ---------- health ---------- */
 app.get("/health", async () => ({ ok: true }));
 
+/* ---------- diagnostics (temporary) ---------- */
+function assertToken(t) {
+  return DIAG_TOKEN && t === DIAG_TOKEN;
+}
+
+// 1) env presence (booleans only)
+app.get("/diag/env", async (req, reply) => {
+  if (!assertToken(req.headers["x-diag-token"])) return reply.code(401).send({ ok:false, error:"unauthorized" });
+  return reply.send({
+    node: process.versions.node,
+    hasSupabaseUrl: !!process.env.SUPABASE_URL,
+    hasServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    hasStripeSecret: !!process.env.STRIPE_SECRET_KEY,
+    hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET
+  });
+});
+
+// 2) DB write test (no Stripe needed)
+app.post("/diag/db", async (req, reply) => {
+  if (!assertToken(req.headers["x-diag-token"])) return reply.code(401).send({ ok:false, error:"unauthorized" });
+
+  const row = {
+    stripe_event_id: "diag_" + Date.now(),
+    customer_email: "diag@example.com",
+    amount: 12.34,
+    currency: "usd",
+    status: "recovered",
+    invoice_id: "diag_inv_" + Date.now()
+  };
+
+  const { error } = await supabaseAdmin.from("receipts").upsert(row, { onConflict: "stripe_event_id" });
+  if (error) {
+    app.log.error({ error_detail: error }, "diag supabase upsert failed");
+    return reply.code(500).send({ ok:false, error:"db_write_failed", detail: error.message || error });
+  }
+  return reply.send({ ok:true });
+});
+
+// 3) version ping
+app.get("/diag/version", async (req, reply) => {
+  if (!assertToken(req.headers["x-diag-token"])) return reply.code(401).send({ ok:false, error:"unauthorized" });
+  return reply.send({ node: process.versions.node });
+});
+
+/* ---------- Stripe webhook ---------- */
 app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, reply) => {
   const sig = req.headers["stripe-signature"];
   if (!sig) return reply.code(400).send({ error: "Missing stripe-signature" });
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(
-      req.rawBody,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     req.log.error({ err }, "stripe signature failed");
     return reply.code(400).send({ error: `Webhook Error: ${err.message}` });
@@ -41,9 +82,9 @@ app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, repl
     "invoice.payment_succeeded": "recovered"
   };
 
+  // ignore others (e.g., invoice.finalized)
   if (statusByType[type]) {
     const amountCents = data.amount_paid ?? data.amount_due ?? data.amount ?? 0;
-
     const row = {
       stripe_event_id: event.id,
       customer_email: data.customer_email ?? data.customer ?? null,
@@ -53,11 +94,9 @@ app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, repl
       invoice_id: data.id
     };
 
-    const { error } = await supabaseAdmin.from("receipts").upsert(row, {
-      onConflict: "stripe_event_id"
-    });
+    const { error } = await supabaseAdmin.from("receipts").upsert(row, { onConflict: "stripe_event_id" });
     if (error) {
-      req.log.error({ error }, "supabase upsert failed");
+      req.log.error({ error_detail: error }, "supabase upsert failed detail");
       return reply.code(500).send({ error: "DB write failed" });
     }
   }
@@ -66,7 +105,4 @@ app.post("/api/webhooks/stripe", { config: { rawBody: true } }, async (req, repl
 });
 
 const PORT = Number(process.env.PORT || 8080);
-app.listen({ port: PORT, host: "0.0.0.0" }).catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+app.listen({ port: PORT, host: "0.0.0.0" }).catch((e) => { console.error(e); process.exit(1); });
