@@ -8,8 +8,8 @@ dotenv.config();
 
 const app = Fastify({ logger: true });
 
-await app.register(fastifyRawBody, { field: "rawBody", global: false, runFirst: true
-  
+await app.register(fastifyRawBody, { field: "rawBody", global: false, runFirst: true });
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20"
 });
